@@ -11,23 +11,24 @@ interface VideoFrame {
 
 export function useVideoMemory() {
   const [isRecording, setIsRecording] = useState(false);
-  const [bufferUsage, setBufferUsage] = useState(0); // 0% to 100%
+  const [bufferUsage, setBufferUsage] = useState(0); 
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user'); // New State
   
-  // REFS (Like RAM registers)
+  // REFS
   const framesBuffer = useRef<VideoFrame[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // 1. START RECORDING
-  const startRecording = useCallback(async () => {
+  // Now accepts an optional mode argument, defaults to current state
+  const startRecording = useCallback(async (modeOverride?: 'user' | 'environment') => {
     try {
-      // FIX: Relaxed constraints. 
-      // We ask for "facingMode: user" (selfie cam) but don't force a resolution.
-      // This prevents "OverconstrainedError" on some devices.
+      const modeToUse = modeOverride || facingMode;
+      
       const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user' } 
+        video: { facingMode: modeToUse } 
       });
       
       setStream(mediaStream);
@@ -37,15 +38,15 @@ export function useVideoMemory() {
 
       setIsRecording(true);
       
-      // Start the Capture Loop
+      // Clear any existing interval just in case
+      if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(captureFrame, CAPTURE_INTERVAL);
 
     } catch (err: any) {
       console.error("Camera Error:", err);
-      // Detailed error alert for debugging
       alert(`Camera Error: ${err.name} - ${err.message}`);
     }
-  }, []);
+  }, [facingMode]);
 
   // 2. STOP RECORDING
   const stopRecording = useCallback(() => {
@@ -59,15 +60,30 @@ export function useVideoMemory() {
     setIsRecording(false);
   }, [stream]);
 
-  // 3. CAPTURE FRAME (The "Clock Cycle")
+  // 3. SWITCH CAMERA (New Function)
+  const switchCamera = useCallback(async () => {
+    // 1. Determine new mode
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newMode);
+
+    // 2. If currently recording, we need to restart the stream seamlessly
+    if (isRecording) {
+      // Stop the *stream* but don't clear the *buffer* (memory)
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      // Restart with new mode
+      await startRecording(newMode);
+    }
+  }, [facingMode, isRecording, stream, startRecording]);
+
+  // 4. CAPTURE FRAME
   const captureFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Draw video frame to canvas
-    // We use the ACTUAL video width/height to avoid stretching
     const width = videoRef.current.videoWidth;
     const height = videoRef.current.videoHeight;
     
@@ -76,32 +92,26 @@ export function useVideoMemory() {
 
     ctx.drawImage(videoRef.current, 0, 0, width, height);
     
-    // Convert to JPEG (smaller size than PNG)
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.6); // Lower quality (0.6) for better performance
+    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.6);
 
-    // Push to Buffer
     framesBuffer.current.push({
       timestamp: Date.now(),
       dataUrl: dataUrl
     });
 
-    // Circular Buffer Logic: If full, remove oldest (FIFO)
     if (framesBuffer.current.length > MAX_FRAMES) {
       framesBuffer.current.shift(); 
     }
 
-    // Update UI (Buffer Percentage)
     setBufferUsage(Math.round((framesBuffer.current.length / MAX_FRAMES) * 100));
   };
 
-  // 4. GET RELEVANT FRAMES (For the AI)
   const getRecentFrames = (sampleRate = 5) => {
     return framesBuffer.current
       .filter((_, index) => index % sampleRate === 0)
       .map(f => f.dataUrl.split(',')[1]); 
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => stopRecording();
   }, []);
@@ -111,6 +121,8 @@ export function useVideoMemory() {
     bufferUsage,
     startRecording,
     stopRecording,
+    switchCamera, // Export this new function
+    facingMode,   // Export state so UI knows which icon to show
     videoRef, 
     canvasRef, 
     getRecentFrames

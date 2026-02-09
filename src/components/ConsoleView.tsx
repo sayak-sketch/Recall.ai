@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Play, Square, Loader2, Send, Zap, Sparkles } from 'lucide-react';
+import { Play, Square, Loader2, Send, Zap, Sparkles, RefreshCw } from 'lucide-react';
 import { useVideoMemory } from '@/hooks/useVideoMemory';
 import { askGemini } from '@/app/actions';
 
@@ -10,7 +10,9 @@ export default function ConsoleView() {
     isRecording, 
     bufferUsage, 
     startRecording, 
-    stopRecording, 
+    stopRecording,
+    switchCamera, // New function
+    facingMode,   // New state
     videoRef, 
     canvasRef,
     getRecentFrames 
@@ -20,7 +22,6 @@ export default function ConsoleView() {
   const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string}[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // CIRCULAR PROGRESS VISUALIZATION
   const radius = 28;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (bufferUsage / 100) * circumference;
@@ -68,7 +69,7 @@ export default function ConsoleView() {
       {/* CONTROL PANEL CARD */}
       <div className="flex items-center justify-between p-4 bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl rounded-3xl border border-white/40 dark:border-slate-700 shadow-xl transition-all">
         
-        {/* Buffer "Eye" Indicator */}
+        {/* Buffer Indicator */}
         <div className="relative w-16 h-16 flex items-center justify-center">
            <svg className="transform -rotate-90 w-full h-full">
              <circle cx="32" cy="32" r={radius} stroke="currentColor" strokeWidth="6" fill="transparent" className="text-slate-200 dark:text-slate-700" />
@@ -87,13 +88,13 @@ export default function ConsoleView() {
                 {isRecording ? <span className="text-red-500 animate-pulse">● Rec</span> : 'Standby'}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-                {isRecording ? 'Observing surroundings...' : 'Ready to help'}
+                {isRecording ? `Using ${facingMode === 'user' ? 'Front' : 'Back'} Camera` : 'Ready to help'}
             </p>
         </div>
 
         {/* Main Toggle Button */}
         <button
-            onClick={isRecording ? handleStop : startRecording}
+            onClick={isRecording ? handleStop : () => startRecording()}
             className={`w-14 h-14 flex items-center justify-center rounded-full shadow-lg transition-all active:scale-95 ${
                 isRecording 
                 ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/30' 
@@ -105,7 +106,7 @@ export default function ConsoleView() {
       </div>
 
       {/* DUAL DISPLAY AREA */}
-      <div className="flex-1 relative overflow-hidden rounded-3xl bg-black border border-slate-800 shadow-2xl">
+      <div className="flex-1 relative overflow-hidden rounded-3xl bg-black border border-slate-800 shadow-2xl group">
          
          <canvas ref={canvasRef} className="hidden" width={640} height={480} />
 
@@ -117,6 +118,16 @@ export default function ConsoleView() {
             muted 
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${isRecording ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
          />
+
+         {/* NEW: CAMERA FLIP BUTTON (Only visible when recording) */}
+         {isRecording && (
+             <button 
+                onClick={switchCamera}
+                className="absolute top-4 right-4 p-3 bg-black/40 backdrop-blur-md rounded-full text-white border border-white/20 hover:bg-black/60 transition-all active:rotate-180 z-10"
+             >
+                <RefreshCw size={20} />
+             </button>
+         )}
 
          {/* LAYER 2: CHAT INTERFACE */}
          <div className={`absolute inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 transition-opacity duration-500 ${!isRecording ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>

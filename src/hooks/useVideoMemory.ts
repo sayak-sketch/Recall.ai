@@ -14,7 +14,7 @@ export function useVideoMemory() {
   const [bufferUsage, setBufferUsage] = useState(0); // 0% to 100%
   const [stream, setStream] = useState<MediaStream | null>(null);
   
-  // REFS (Like RAM registers - they hold data without triggering re-renders)
+  // REFS (Like RAM registers)
   const framesBuffer = useRef<VideoFrame[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -23,8 +23,11 @@ export function useVideoMemory() {
   // 1. START RECORDING
   const startRecording = useCallback(async () => {
     try {
+      // FIX: Relaxed constraints. 
+      // We ask for "facingMode: user" (selfie cam) but don't force a resolution.
+      // This prevents "OverconstrainedError" on some devices.
       const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480, facingMode: 'user' } 
+        video: { facingMode: 'user' } 
       });
       
       setStream(mediaStream);
@@ -36,9 +39,11 @@ export function useVideoMemory() {
       
       // Start the Capture Loop
       intervalRef.current = setInterval(captureFrame, CAPTURE_INTERVAL);
-    } catch (err) {
+
+    } catch (err: any) {
       console.error("Camera Error:", err);
-      alert("Could not access camera. Please allow permissions.");
+      // Detailed error alert for debugging
+      alert(`Camera Error: ${err.name} - ${err.message}`);
     }
   }, []);
 
@@ -62,10 +67,17 @@ export function useVideoMemory() {
     if (!ctx) return;
 
     // Draw video frame to canvas
-    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
+    // We use the ACTUAL video width/height to avoid stretching
+    const width = videoRef.current.videoWidth;
+    const height = videoRef.current.videoHeight;
+    
+    canvasRef.current.width = width;
+    canvasRef.current.height = height;
+
+    ctx.drawImage(videoRef.current, 0, 0, width, height);
     
     // Convert to JPEG (smaller size than PNG)
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.7);
+    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.6); // Lower quality (0.6) for better performance
 
     // Push to Buffer
     framesBuffer.current.push({
@@ -83,12 +95,10 @@ export function useVideoMemory() {
   };
 
   // 4. GET RELEVANT FRAMES (For the AI)
-  // We don't send ALL frames. We sample them to save bandwidth.
   const getRecentFrames = (sampleRate = 5) => {
-    // Return every Nth frame
     return framesBuffer.current
       .filter((_, index) => index % sampleRate === 0)
-      .map(f => f.dataUrl.split(',')[1]); // Remove "data:image/jpeg;base64," prefix
+      .map(f => f.dataUrl.split(',')[1]); 
   };
 
   // Cleanup on unmount
@@ -101,8 +111,8 @@ export function useVideoMemory() {
     bufferUsage,
     startRecording,
     stopRecording,
-    videoRef, // Attach this to a <video> tag
-    canvasRef, // Attach this to a hidden <canvas> tag
+    videoRef, 
+    canvasRef, 
     getRecentFrames
   };
 }
